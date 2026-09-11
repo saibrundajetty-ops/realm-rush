@@ -113,7 +113,11 @@ function project(x,y,z){
  let screenX=-sy*dx+cy*dy;
  let depth=cy*dx+sy*dy+CAMERA_DISTANCE;
  if(depth<=.5)return null;
- let scale=CAMERA_FOCAL/depth;
+ let perspectiveScale=CAMERA_FOCAL/depth;
+ // Renderer-only near-object guard: preserve depth and camera basis while
+ // preventing close environmental geometry from expanding without limit.
+ const MAX_RENDER_SCALE=16;
+ let scale=Math.min(perspectiveScale,MAX_RENDER_SCALE);
  return {
    x:viewW/2+screenX*scale,
    y:viewH*CAMERA_HORIZON+(CAMERA_HEIGHT-z)*scale*CAMERA_GROUND_TILT,
