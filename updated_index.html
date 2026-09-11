@@ -1,1 +1,209 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><title>Realm Rush — Zero Cost Vertical Slice</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#0b1020;font-family:system-ui,sans-serif}#diagnostic{position:fixed;left:8px;bottom:8px;z-index:20;max-width:92vw;padding:6px 9px;border-radius:7px;background:#07101dcc;color:#9ff;font:12px/1.3 ui-monospace,monospace;pointer-events:none}canvas{display:block;width:100%;height:100%}#hud{position:fixed;inset:0;pointer-events:none;color:#fff;text-shadow:0 2px 3px #000}#top{position:absolute;top:14px;left:14px;background:#111a;backdrop-filter:blur(4px);padding:10px 14px;border-radius:10px;font-size:14px;line-height:1.45}#mission{position:absolute;top:14px;right:14px;max-width:310px;background:#111a;padding:10px 14px;border-radius:10px;text-align:right}#help{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:#111b;padding:8px 12px;border-radius:9px;font-size:13px}#banner{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);font-size:30px;font-weight:800;text-align:center;opacity:0;transition:.2s}#map{position:absolute;right:14px;bottom:14px;width:180px;height:130px;background:#07101ddd;border:1px solid #7ff;border-radius:8px;display:none}
+#touch{display:none;position:fixed;inset:0;pointer-events:none;touch-action:none}#joystick{position:absolute;left:max(22px,env(safe-area-inset-left));bottom:max(24px,env(safe-area-inset-bottom));width:132px;height:132px;border:2px solid #ffffff66;border-radius:50%;background:#10203a99;pointer-events:auto;touch-action:none}.stick{position:absolute;left:41px;top:41px;width:50px;height:50px;border-radius:50%;background:#b8d7ffbb;border:2px solid #fff9;box-sizing:border-box}.touchBtn{position:absolute;width:68px;height:68px;border-radius:50%;border:1px solid #ffffff88;background:#182a4ddd;color:#fff;font-weight:800;font-size:12px;box-shadow:0 3px 12px #0008;pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none}.touchBtn:active{background:#536dceee}.jump{right:max(28px,env(safe-area-inset-right));bottom:max(36px,env(safe-area-inset-bottom));}.dash{right:max(112px,calc(env(safe-area-inset-right) + 84px));bottom:max(92px,calc(env(safe-area-inset-bottom) + 58px));}.wall{right:max(28px,env(safe-area-inset-right));bottom:max(124px,calc(env(safe-area-inset-bottom) + 92px));}.lookHint{position:absolute;right:18px;top:50%;color:#fff8;font-size:11px;text-align:right;transform:translateY(-50%);padding:8px;pointer-events:none}@media (pointer:coarse){#touch{display:block}#help{bottom:8px;font-size:11px;max-width:80%;text-align:center}#top,#mission{font-size:12px;padding:8px 10px;max-width:42vw}#mission{top:8px;right:8px}#top{top:8px;left:8px}#banner{font-size:24px}}@media (orientation:portrait) and (pointer:coarse){#help{display:none}.lookHint{top:38%}}
+</style></head>
+<body><div id="diagnostic" aria-live="polite">Starting Realm Rush…</div><canvas id="game"></canvas><canvas id="map"></canvas><div id="touch" aria-label="Touch controls"><div id="joystick" aria-label="Movement joystick"><div class="stick"></div></div><button class="touchBtn jump" id="jumpBtn">JUMP</button><button class="touchBtn dash" id="dashBtn">DASH</button><button class="touchBtn wall" id="wallBtn">WALL<br>RUN</button><div class="lookHint">Drag the open screen to look</div></div><div id="hud"><div id="top"></div><div id="mission"></div><div id="help">WASD move · Mouse drag turn · Space jump · Shift dash · E interact · R wall-run · M map · P pause</div><div id="banner"></div></div><script>
+'use strict';
+const diagnosticEl=document.getElementById('diagnostic');
+function diagnostic(message, ok=true){
+  if(diagnosticEl){diagnosticEl.textContent=(ok?'✓ ':'⚠ ')+message;diagnosticEl.style.color=ok?'#9ff':'#ffb4b4';}
+  try{console.info('[Realm Rush]',message);}catch(_){ }
+}
+window.addEventListener('error',e=>{
+  const where=e.filename?` @ ${e.filename.split('/').pop()}:${e.lineno||0}:${e.colno||0}`:'';
+  diagnostic('JavaScript error: '+(e.message||'unknown error')+where,false);
+});
+window.addEventListener('unhandledrejection',e=>{
+  const r=e.reason;
+  diagnostic('JavaScript promise error: '+(r&&r.stack?r.stack:(r&&r.message)||String(r||'unknown error')),false);
+});
+diagnostic('Script loaded and JavaScript executed');
+diagnostic('DOM ready: body and diagnostic element available');
+const C=document.getElementById('game');
+const M=document.getElementById('map');
+const ctx=C&&C.getContext('2d',{alpha:false});
+const mx=M&&M.getContext('2d');
+if(!C||!ctx){diagnostic('Canvas initialization failed',false); throw new Error('Realm Rush canvas failed to initialize');}
+diagnostic('2D context created');
+diagnostic('Canvas initialized');
+let viewW=0,viewH=0,viewDpr=1;
+function getViewport(){
+  const vv=window.visualViewport;
+  return {w:Math.max(1,Math.round(vv&&vv.width||window.innerWidth||320)),h:Math.max(1,Math.round(vv&&vv.height||window.innerHeight||240))};
+}
+function resize(){
+  const v=getViewport(); viewW=v.w; viewH=v.h; viewDpr=Math.min(2,Math.max(1,window.devicePixelRatio||1));
+  C.width=Math.max(1,Math.floor(viewW*viewDpr)); C.height=Math.max(1,Math.floor(viewH*viewDpr));
+  C.style.width='100%'; C.style.height='100%';
+  ctx.setTransform(viewDpr,0,0,viewDpr,0,0);
+  if(M){M.width=180*viewDpr;M.height=130*viewDpr;mx&&mx.setTransform(viewDpr,0,0,viewDpr,0,0);}
+}
+addEventListener('resize',resize,{passive:true});
+addEventListener('orientationchange',()=>setTimeout(resize,80),{passive:true});
+if(window.visualViewport)window.visualViewport.addEventListener('resize',resize,{passive:true});
+resize();
+diagnostic('Viewport calculated: '+viewW+'×'+viewH+'; canvas '+C.width+'×'+C.height);
+const W=360,H=260, TAU=Math.PI*2; const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)); const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const player={x:18,y:126,z:0,yaw:0,vx:0,vy:0,vz:0,ground:true,dash:0,wall:0,coins:0,xp:0,ability:0};
+diagnostic('Game state created: player and camera');
+const cam={x:0,y:0,z:0}; let paused=false,mapOpen=false,flashT=0;let currentMission=0;const missions=[
+{id:'M01',name:'Village Discovery',need:3,got:0,reward:'Realm Shard',done:false},
+{id:'M02',name:'Guardian Trial',need:1,got:0,reward:'Realm Dash',done:false},
+{id:'M03',name:'Forest Signal',need:1,got:0,reward:'Energy Core',done:false},
+{id:'M04',name:'Crystal Run',need:1,got:0,reward:'Treasure Key + Wall Run',done:false},
+{id:'M05',name:'Metro Dash',need:1,got:0,reward:'City Trail',done:false},
+{id:'M06',name:'Drone Chase',need:1,got:0,reward:'City Access Token',done:false}];
+diagnostic('Missions initialized: M01–M06');
+const landmarks=[{x:52,y:130,n:'Realm Core Beacon'},{x:78,y:105,n:'Village Waystone'},{x:106,y:130,n:'Ancient Gate'},{x:150,y:175,n:'Moonlit Lake'},{x:184,y:160,n:'Forgotten Temple'},{x:208,y:145,n:'Research Station'},{x:250,y:135,n:'Transit Plaza'},{x:292,y:135,n:'Neon Underpass'},{x:325,y:135,n:'Skyline Ramp'}];
+const gates=[{x:106,y:130,id:'LG1',req:0,open:false},{x:142,y:155,id:'LG2',req:1,open:false},{x:208,y:145,id:'LG3',req:2,open:false},{x:325,y:135,id:'LG4',req:2,open:false}];
+const cols=[{x:52,y:130,t:'shard',got:false},{x:72,y:96,t:'coin',got:false},{x:88,y:112,t:'coin',got:false},{x:152,y:184,t:'coin',got:false},{x:194,y:175,t:'energy',got:false},{x:215,y:132,t:'key',got:false},{x:270,y:125,t:'coin',got:false},{x:306,y:145,t:'coin',got:false},{x:338,y:122,t:'token',got:false}];
+diagnostic('World generation started');
+const buildings=[];function box(x,y,w,h,zone){buildings.push({x,y,w,h,zone})}
+// R1
+box(25,150,22,14,1);box(65,80,18,12,1);box(92,155,12,18,1);box(12,105,12,12,1);
+// R2
+box(130,175,12,9,2);box(175,160,16,12,2);box(202,142,14,14,2);box(122,90,15,12,2);box(220,105,13,16,2);
+// R3
+box(250,108,22,18,3);box(276,155,18,14,3);box(302,104,20,18,3);box(330,160,20,15,3);
+diagnostic('World geometry created: buildings');
+const trees=[];for(let i=0;i<65;i++){let x=8+Math.random()*342,y=72+Math.random()*116;if(x>112&&x<238&&y>105&&y<190 || x>242&&y>112&&y<160)continue;trees.push({x,y,s:.7+Math.random()*.8})}
+diagnostic('World generation complete: trees and collectibles prepared');
+const race=[];[[150,184],[162,190],[178,180],[195,170],[210,155],[225,145],[240,135],[255,135],[270,130]].forEach(([x,y])=>race.push({x,y}));let ai={x:150,y:184,i:0,speed:4.3,active:false,done:false};
+diagnostic('Player and AI entities created');
+const keys={};addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true;if(e.key.toLowerCase()==='m'){mapOpen=!mapOpen;M.style.display=mapOpen?'block':'none'}if(e.key.toLowerCase()==='p')paused=!paused;if(e.code==='Space'&&!e.repeat&&player.ground){player.vz=6;player.ground=false}if(e.key==='Shift'&&!e.repeat&&player.ability>=1&&player.dash<=0)player.dash=.35;if(e.key.toLowerCase()==='e')interact()});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+let drag=false,lastX=0;addEventListener('mousedown',e=>{drag=true;lastX=e.clientX});addEventListener('mouseup',()=>drag=false);addEventListener('mousemove',e=>{if(drag){player.yaw+=(e.clientX-lastX)*.006;lastX=e.clientX}});
+diagnostic('Keyboard/mouse controls initialized');
+function notify(t){const b=document.getElementById('banner');b.textContent=t;b.style.opacity=1;flashT=2}
+function near(x,y,r=5){return Math.hypot(player.x-x,player.y-y)<r}
+function interact(){if(paused)return;
+ if(near(52,130,9)&&!missions[0].done){missions[0].got=Math.max(missions[0].got,1);notify('Realm Core Beacon discovered');currentMission=0}
+ if(near(78,105,7)&&!missions[0].done){missions[0].got++;notify('Village landmark discovered')}
+ if(near(95,135,8)&&!missions[0].done){missions[0].got++;if(missions[0].got>=3){missions[0].done=true;player.coins+=100;player.xp+=150;currentMission=1;notify('M01 complete · Realm Shard found')}}
+ if(near(106,130,7)&&missions[0].done&&!missions[1].done){missions[1].got=1;missions[1].done=true;player.coins+=200;player.xp+=300;player.ability=1;gates[0].open=true;currentMission=2;notify('M02 complete · Realm Dash unlocked')}
+ if(near(208,145,8)&&missions[2].done===false&&missions[0].done){missions[2].got=1;missions[2].done=true;player.coins+=150;player.xp+=250;currentMission=3;notify('M03 complete · Energy Core recovered')}
+ if(near(160,188,12)&&missions[2].done&&!missions[3].done){ai.active=true;missions[3].got=1;missions[3].done=true;player.coins+=250;player.xp+=350;player.ability=2;gates[2].open=true;gates[3].open=true;currentMission=4;notify('M04 complete · Wall Run unlocked')}
+ if(near(250,135,10)&&missions[3].done&&!missions[4].done){missions[4].got=1;missions[4].done=true;player.coins+=250;player.xp+=350;currentMission=5;notify('M05 complete · City Trail')}
+ if(near(306,135,12)&&missions[4].done&&!missions[5].done){missions[5].got=1;missions[5].done=true;player.coins+=300;player.xp+=450;currentMission=5;notify('M06 complete · City Access Token')}
+}
+function update(dt){if(paused)return;flashT-=dt;if(flashT<=0)document.getElementById('banner').style.opacity=0;
+ let f=(keys.w?1:0)-(keys.s?1:0),s=(keys.d?1:0)-(keys.a?1:0),len=Math.hypot(f,s)||1;f/=len;s/=len;let sp=keys.control?2.8:5.0;if(player.dash>0){sp=15;player.dash-=dt}
+ let cy=Math.cos(player.yaw),sy=Math.sin(player.yaw);player.vx=(cy*f-sy*s)*sp;player.vy=(sy*f+cy*s)*sp;player.x+=player.vx*dt;player.y+=player.vy*dt;
+ if(keys.r&&player.ability>=2&&!player.ground){player.wall=0.25;player.vz=3.8}player.vz-=15*dt;player.z+=player.vz*dt;if(player.z<=0){player.z=0;player.vz=0;player.ground=true}
+ // simple world boundary
+ player.x=clamp(player.x,2,W-2);player.y=clamp(player.y,68,H-45);
+ // gate checks / soft blockers
+ for(const g of gates){if(dist(player,g)<5&&!g.open&&((g.id==='LG1'&&!missions[0].done)||(g.id==='LG2'&&player.ability<1)||(g.id==='LG3'&&player.ability<2)||(g.id==='LG4'&&player.ability<2))){player.x-=player.vx*dt;player.y-=player.vy*dt;notify(g.id+' locked')}}
+ for(const c of cols)if(!c.got&&Math.hypot(player.x-c.x,player.y-c.y)<2.2){c.got=true;player.coins+=c.t==='coin'?10:0;player.xp+=c.t==='coin'?10:25;notify(c.t==='coin'?'+10 coins':c.t.toUpperCase()+' collected')}
+ if(ai.active&&!ai.done){let p=race[ai.i],dx=p.x-ai.x,dy=p.y-ai.y,d=Math.hypot(dx,dy);if(d<2){ai.i++;if(ai.i>=race.length){ai.done=true;ai.active=false;notify('Kael finished the Crystal Run')}}else{ai.x+=dx/d*ai.speed*dt;ai.y+=dy/d*ai.speed*dt}}
+ if(currentMission===3&&!missions[3].done&&near(160,188,14))interact();
+}
+// Greenfield camera projection: ground depth now controls screen Y as well as scale.
+// Keep player yaw/orientation unchanged; only alter the renderer's camera model.
+const CAMERA_HEIGHT=10;
+const CAMERA_HORIZON=.30;
+const CAMERA_FOCAL=520;
+const CAMERA_GROUND_TILT=.72;
+function project(x,y,z){
+ let dx=x-player.x,dy=y-player.y;
+ let cy=Math.cos(player.yaw),sy=Math.sin(player.yaw);
+ let X=cy*dx+sy*dy;
+ let depth=-sy*dx+cy*dy+10;
+ if(depth<=.5)return null;
+ let scale=CAMERA_FOCAL/depth;
+ return {
+   x:viewW/2+X*scale,
+   y:viewH*CAMERA_HORIZON+(CAMERA_HEIGHT-z)*scale*CAMERA_GROUND_TILT,
+   scale,
+   depth
+ };
+}
+function poly(points,fill,stroke='#0005'){if(points.some(p=>!p))return;ctx.fillStyle=fill;ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i++)ctx.lineTo(points[i].x,points[i].y);ctx.closePath();ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.stroke()}}
+function drawCube(o,color){
+  // Renderer fix: the old routine projected all four footprint corners at z=0,
+  // producing a nearly invisible flat line. Draw a true screen-space vertical volume.
+  const bh=o.zone===1?9:o.zone===2?8:10;
+  const a=project(o.x,o.y,0),b=project(o.x+o.w,o.y,0),c=project(o.x+o.w,o.y+o.h,0),d=project(o.x,o.y+o.h,0);
+  const at=project(o.x,o.y,bh),bt=project(o.x+o.w,o.y,bh),ct=project(o.x+o.w,o.y+o.h,bh),dt=project(o.x,o.y+o.h,bh);
+  if([a,b,c,d,at,bt,ct,dt].some(v=>!v))return;
+  poly([d,c,ct,dt],color); poly([b,c,ct,bt],color==='#8c7458'?'#6e5a45':color==='#46534e'?'#35413d':'#272f3a'); poly([a,b,bt,at],color);
+  poly([at,bt,ct,dt],color==='#8c7458'?'#b18b63':color==='#46534e'?'#65776a':'#4b5668');
+  // Simple readable facade details, kept entirely procedural.
+  const center=project(o.x+o.w*.5,o.y-.02,bh*.38), roofL=project(o.x-.8,o.y-.3,bh), roofR=project(o.x+o.w+.8,o.y-.3,bh);
+  if(center&&roofL&&roofR){ctx.fillStyle='#6b3f32';ctx.beginPath();ctx.moveTo(roofL.x,roofL.y);ctx.lineTo(roofR.x,roofR.y);ctx.lineTo(center.x,center.y-bh*.42);ctx.closePath();ctx.fill();}
+  const door=project(o.x+o.w*.5,o.y-.08,2.3);if(door){ctx.fillStyle='#38251f';ctx.fillRect(door.x-3,door.y-10,6,10);}
+  const win=project(o.x+o.w*.22,o.y-.1,4.5);if(win){ctx.fillStyle='#b9e8ef';ctx.fillRect(win.x-3,win.y-3,6,5);}
+}
+let firstFrame=false;
+function draw(){ctx.clearRect(0,0,viewW,viewH);let g=ctx.createLinearGradient(0,0,0,viewH);g.addColorStop(0,'#18254a');g.addColorStop(.5,'#31536a');g.addColorStop(1,'#111827');ctx.fillStyle=g;ctx.fillRect(0,0,viewW,viewH);
+ // ground bands approximate region colors
+ ctx.fillStyle='#526b45';ctx.fillRect(0,viewH*.55,viewW,viewH*.45);
+ // Greenfield-only environmental depth layers.
+ const hillY=viewH*.55;ctx.fillStyle='#304d42';ctx.beginPath();ctx.moveTo(0,hillY);for(let x=0;x<=viewW;x+=40)ctx.lineTo(x,hillY-35-Math.sin(x*.018)*24);ctx.lineTo(viewW,hillY);ctx.closePath();ctx.fill();
+ const lakeA=project(82,166,0),lakeB=project(116,166,0),lakeC=project(116,184,0),lakeD=project(82,184,0);poly([lakeA,lakeB,lakeC,lakeD],'#3e9bb0','#9be7e8');
+ const castle=project(58,92,0);if(castle){ctx.fillStyle='#6d7184';ctx.fillRect(castle.x-28,castle.y-34,56,34);ctx.fillStyle='#8d91a8';for(const dx of [-24,20]){ctx.fillRect(castle.x+dx,castle.y-48,12,48);ctx.beginPath();ctx.moveTo(castle.x+dx-3,castle.y-48);ctx.lineTo(castle.x+dx+6,castle.y-60);ctx.lineTo(castle.x+dx+15,castle.y-48);ctx.fill();}}
+ // distant region signposts
+ for(const b of buildings){let c=b.zone===1?'#8c7458':b.zone===2?'#46534e':'#343c48';drawCube(b,c)}
+ for(const t of trees){let p=project(t.x,t.y,0),top=project(t.x,t.y,13*t.s);if(p&&top){ctx.strokeStyle='#5d4732';ctx.lineWidth=Math.max(2,5*p.scale);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(top.x,top.y+8*t.s);ctx.stroke();ctx.fillStyle='#2f6b3d';ctx.beginPath();ctx.arc(top.x,top.y,18*t.s*p.scale/2.2,0,TAU);ctx.fill();ctx.fillStyle='#4f8d48';ctx.beginPath();ctx.arc(top.x-8*t.s,top.y+5,13*t.s*p.scale/2.4,0,TAU);ctx.fill();}}
+ // road/spine as repeated perspective strips
+ const roadY=130;for(let x=0;x<W;x+=8){let p=project(x,roadY,0),q=project(x+8,roadY,0);if(p&&q){ctx.strokeStyle=x<120?'#a69a82':x<240?'#59665d':'#59606a';ctx.lineWidth=Math.max(2,180/p.depth);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke()}}
+ // collectibles and landmarks
+ for(const c of cols)if(!c.got){let p=project(c.x,c.y,1.5);if(p){ctx.fillStyle=c.t==='coin'?'#ffd95a':c.t==='shard'?'#b88cff':c.t==='energy'?'#66e6ff':c.t==='key'?'#e5c86b':'#4fe5d1';ctx.beginPath();ctx.arc(p.x,p.y,8,0,TAU);ctx.fill()}}
+ for(const g of gates){let p=project(g.x,g.y,3);if(p){ctx.strokeStyle=g.open?'#75f':'#f55';ctx.lineWidth=6;ctx.strokeRect(p.x-22,p.y-55,44,55)}}
+ if(ai.active||!ai.done){let p=project(ai.x,ai.y,0);if(p){ctx.fillStyle='#ff7b7b';ctx.beginPath();ctx.arc(p.x,p.y-30,10,0,TAU);ctx.fill()}}
+ // player
+ let pp=project(player.x,player.y,player.z);if(pp){ctx.fillStyle='#e8f0ff';ctx.beginPath();ctx.arc(innerWidth/2,viewH*.55-player.z*40,13,0,TAU);ctx.fill();ctx.fillStyle='#8b6cff';ctx.fillRect(innerWidth/2-8,viewH*.55-player.z*40+9,16,18)}
+ if(paused){ctx.fillStyle='#0009';ctx.fillRect(0,0,viewW,viewH);ctx.fillStyle='#fff';ctx.font='bold 36px system-ui';ctx.textAlign='center';ctx.fillText('PAUSED',innerWidth/2,innerHeight/2)}
+ updateHud();drawMap();if(!firstFrame){firstFrame=true;diagnostic('First frame rendered: player and world drawn');diagnostic('Realm Rush Ready');}}
+function updateHud(){let m=missions[currentMission]||missions[5];document.getElementById('top').innerHTML=`<b>REALM RUSH</b><br>Region: ${player.x<120?'Greenfield Village':player.x<240?'Whispering Woods':'Central City Edge'}<br>Coins: ${player.coins} · XP: ${player.xp}<br>Abilities: ${player.ability>=1?'Realm Dash ':''}${player.ability>=2?'· Wall Run':''}`;document.getElementById('mission').innerHTML=`<b>${m.id} — ${m.name}</b><br>${m.done?'✓ Complete':'Objective: interact/explore'}<br>Reward: ${m.reward}`}
+function drawMap(){mx.clearRect(0,0,M.width,M.height);mx.fillStyle='#09131b';mx.fillRect(0,0,180,130);mx.strokeStyle='#78d';mx.lineWidth=5;mx.beginPath();mx.moveTo(10,65);mx.lineTo(175,65);mx.stroke();mx.strokeStyle='#5c7';mx.beginPath();mx.moveTo(55,85);mx.lineTo(105,95);mx.lineTo(130,75);mx.stroke();for(const g of gates){mx.fillStyle=g.open?'#7df':'#f66';mx.fillRect(g.x/2-3,g.y/2-3,6,6)}mx.fillStyle='#fff';mx.beginPath();mx.arc(player.x/2,player.y/2,3,0,TAU);mx.fill()}
 
+diagnostic('Touch-control initialization started');
+// iPad / touch controls: additive adapter; keyboard and mouse controls remain unchanged.
+(function setupTouchControls(){
+  const touchRoot=document.getElementById('touch');
+  const joy=document.getElementById('joystick'), stick=joy&&joy.querySelector('.stick');
+  const jumpBtn=document.getElementById('jumpBtn'), dashBtn=document.getElementById('dashBtn'), wallBtn=document.getElementById('wallBtn');
+  if(!touchRoot||!joy||!stick)return;
+  const touchKeys={w:false,a:false,s:false,d:false,r:false};
+  let joyId=null, lookId=null, lookX=0;
+  function setKey(k,v){touchKeys[k]=v; keys[k]=v || !!keys[k+'_keyboard'];}
+  function syncMovement(){for(const k of ['w','a','s','d','r']) keys[k]=!!touchKeys[k] || !!keys[k+'_keyboard'];}
+  addEventListener('keydown',e=>{keys[e.key.toLowerCase()+'_keyboard']=true;});
+  addEventListener('keyup',e=>{keys[e.key.toLowerCase()+'_keyboard']=false;syncMovement();});
+  function joyMove(e){
+    const r=joy.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
+    let dx=e.clientX-cx, dy=e.clientY-cy, max=r.width*.34, len=Math.hypot(dx,dy);
+    if(len>max){dx=dx/len*max;dy=dy/len*max;}
+    stick.style.transform=`translate(${dx}px,${dy}px)`;
+    const nx=dx/max, ny=dy/max;
+    touchKeys.w=ny<-.25; touchKeys.s=ny>.25; touchKeys.a=nx<-.25; touchKeys.d=nx>.25; syncMovement();
+  }
+  joy.addEventListener('pointerdown',e=>{if(joyId!==null)return;joyId=e.pointerId;joy.setPointerCapture(e.pointerId);joyMove(e);e.preventDefault();});
+  joy.addEventListener('pointermove',e=>{if(e.pointerId===joyId)joyMove(e);e.preventDefault();});
+  function joyEnd(e){if(e.pointerId!==joyId)return;joyId=null;touchKeys.w=touchKeys.a=touchKeys.s=touchKeys.d=false;stick.style.transform='translate(0,0)';syncMovement();e.preventDefault();}
+  joy.addEventListener('pointerup',joyEnd);joy.addEventListener('pointercancel',joyEnd);joy.addEventListener('pointerleave',e=>{if(e.pointerId===joyId)joyEnd(e);});
+  function pressButton(btn,down,up){
+    btn.addEventListener('pointerdown',e=>{btn.setPointerCapture(e.pointerId);down(e);e.preventDefault();});
+    btn.addEventListener('pointerup',e=>{up(e);e.preventDefault();});
+    btn.addEventListener('pointercancel',e=>{up(e);e.preventDefault();});
+  }
+  pressButton(jumpBtn,()=>{if(!paused&&player.ground){player.vz=6;player.ground=false;}},()=>{});
+  pressButton(dashBtn,()=>{if(!paused&&player.ability>=1&&player.dash<=0)player.dash=.35;},()=>{});
+  pressButton(wallBtn,()=>{touchKeys.r=true;syncMovement();},()=>{touchKeys.r=false;syncMovement();});
+  C.addEventListener('pointerdown',e=>{if(e.pointerType==='touch' && e.clientX>viewW*.28){lookId=e.pointerId;lookX=e.clientX;C.setPointerCapture(e.pointerId);e.preventDefault();}});
+  C.addEventListener('pointermove',e=>{if(e.pointerId===lookId){player.yaw+=(e.clientX-lookX)*.006;lookX=e.clientX;e.preventDefault();}});
+  function lookEnd(e){if(e.pointerId===lookId){lookId=null;e.preventDefault();}}
+  C.addEventListener('pointerup',lookEnd);C.addEventListener('pointercancel',lookEnd);
+  // Prevent Safari gesture/pinch behavior over the game surface.
+  document.addEventListener('gesturestart',e=>e.preventDefault(),{passive:false});
+  document.addEventListener('touchmove',e=>{if(e.target.closest('#touch')||e.target===C)e.preventDefault();},{passive:false});
+})();
+diagnostic('Touch controls initialized');
+
+diagnostic('Initialization complete; entering animation scheduling');
+let last=performance.now();let loopStarted=false;function loop(t){if(!loopStarted){loopStarted=true;diagnostic('Rendering loop started');}let dt=Math.min(.033,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+diagnostic('requestAnimationFrame scheduled');
+
+</script></body></html>
