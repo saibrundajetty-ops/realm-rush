@@ -25,3 +25,7 @@ This is a functional zero-cost prototype, not the final Form-stage 3D build. Vis
 
 ## Cost
 ₹0. No paid service, Meshy, paid API, purchased asset, plugin, texture, music, backend, or external asset download was used.
+
+## Runtime-debug packaging note
+
+This diagnostic package embeds the existing `src/game.js` code directly into `index.html` so iPad local-file viewers do not need to resolve an external JavaScript subpath. The renderer and gameplay remain unchanged. The bottom-left diagnostic indicator reports initialization progress and runtime errors.
