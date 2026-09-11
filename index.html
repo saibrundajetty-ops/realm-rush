@@ -98,7 +98,29 @@ function update(dt){if(paused)return;flashT-=dt;if(flashT<=0)document.getElement
  if(ai.active&&!ai.done){let p=race[ai.i],dx=p.x-ai.x,dy=p.y-ai.y,d=Math.hypot(dx,dy);if(d<2){ai.i++;if(ai.i>=race.length){ai.done=true;ai.active=false;notify('Kael finished the Crystal Run')}}else{ai.x+=dx/d*ai.speed*dt;ai.y+=dy/d*ai.speed*dt}}
  if(currentMission===3&&!missions[3].done&&near(160,188,14))interact();
 }
-function project(x,y,z){let dx=x-player.x,dy=y-player.y;let cy=Math.cos(player.yaw),sy=Math.sin(player.yaw);let X=cy*dx+sy*dy,Y=-sy*dx+cy*dy;let depth=Y+7;if(depth<=.1)return null;let f=700/depth;return {x:viewW/2+X*f,y:viewH*.55-z*f*.55,scale:f/depth,depth}}
+// Greenfield camera basis correction only.
+// Gameplay defines forward as (cos(yaw), sin(yaw)); at yaw 0 that is world +X.
+// Therefore renderer depth must use that same forward axis, while world +Y
+// becomes the camera's horizontal left/right axis. Camera constants are unchanged.
+const CAMERA_HEIGHT=10;
+const CAMERA_HORIZON=.30;
+const CAMERA_FOCAL=520;
+const CAMERA_GROUND_TILT=.72;
+const CAMERA_DISTANCE=10;
+function project(x,y,z){
+ let dx=x-player.x,dy=y-player.y;
+ let cy=Math.cos(player.yaw),sy=Math.sin(player.yaw);
+ let screenX=-sy*dx+cy*dy;
+ let depth=cy*dx+sy*dy+CAMERA_DISTANCE;
+ if(depth<=.5)return null;
+ let scale=CAMERA_FOCAL/depth;
+ return {
+   x:viewW/2+screenX*scale,
+   y:viewH*CAMERA_HORIZON+(CAMERA_HEIGHT-z)*scale*CAMERA_GROUND_TILT,
+   scale,
+   depth
+ };
+}
 function poly(points,fill,stroke='#0005'){if(points.some(p=>!p))return;ctx.fillStyle=fill;ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i++)ctx.lineTo(points[i].x,points[i].y);ctx.closePath();ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.stroke()}}
 function drawCube(o,color){
   // Renderer fix: the old routine projected all four footprint corners at z=0,
